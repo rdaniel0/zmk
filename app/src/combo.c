@@ -203,10 +203,10 @@ static int filter_candidates(int32_t position) {
 
 static int64_t first_candidate_timeout() {
     if (pressed_keys_count == 0) {
-        return LONG_MAX;
+        return LLONG_MAX;
     }
 
-    int64_t first_timeout = LONG_MAX;
+    int64_t first_timeout = LLONG_MAX;
     for (int i = 0; i < ARRAY_SIZE(combos); i++) {
         if (sys_bitfield_test_bit((mem_addr_t)&candidates, i)) {
             first_timeout = MIN(first_timeout, combos[i].timeout_ms);
