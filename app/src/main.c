@@ -16,6 +16,43 @@ LOG_MODULE_REGISTER(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <hal/nrf_power.h>
 #endif
 
+#if IS_ENABLED(CONFIG_TASK_WDT)
+#include <zephyr/task_wdt/task_wdt.h>
+
+// Feed the task watchdog from the system workqueue every 5 seconds.
+// If the system workqueue hangs, the feed stops, and after the timeout
+// the hardware watchdog resets the MCU with RESETREAS=WATCHDOG.
+#define WDT_FEED_INTERVAL_MS 5000
+#define WDT_TIMEOUT_MS 30000
+
+static int wdt_channel_id = -1;
+
+static void wdt_feed_handler(struct k_work *work);
+K_WORK_DELAYABLE_DEFINE(wdt_feed_work, wdt_feed_handler);
+
+static void wdt_feed_handler(struct k_work *work) {
+    if (wdt_channel_id >= 0) {
+        task_wdt_feed(wdt_channel_id);
+    }
+    k_work_schedule(&wdt_feed_work, K_MSEC(WDT_FEED_INTERVAL_MS));
+}
+
+static void wdt_init(void) {
+    int err = task_wdt_init(NULL);
+    if (err) {
+        LOG_ERR("Task WDT init failed: %d", err);
+        return;
+    }
+    wdt_channel_id = task_wdt_add(WDT_TIMEOUT_MS, NULL, NULL);
+    if (wdt_channel_id < 0) {
+        LOG_ERR("Task WDT add channel failed: %d", wdt_channel_id);
+        return;
+    }
+    k_work_schedule(&wdt_feed_work, K_MSEC(WDT_FEED_INTERVAL_MS));
+    LOG_INF("Task watchdog started: feed=%dms timeout=%dms", WDT_FEED_INTERVAL_MS, WDT_TIMEOUT_MS);
+}
+#endif /* CONFIG_TASK_WDT */
+
 #if IS_ENABLED(CONFIG_ZMK_DISPLAY)
 
 #include <zmk/display.h>
@@ -43,6 +80,10 @@ int main(void) {
 #if IS_ENABLED(CONFIG_SETTINGS)
     settings_subsys_init();
     settings_load();
+#endif
+
+#if IS_ENABLED(CONFIG_TASK_WDT)
+    wdt_init();
 #endif
 
 #ifdef CONFIG_ZMK_DISPLAY
