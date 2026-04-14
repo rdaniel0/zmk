@@ -14,6 +14,10 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/gatt.h>
 
+#if IS_ENABLED(CONFIG_TASK_WDT)
+#include <zephyr/task_wdt/task_wdt.h>
+#endif
+
 #include <zmk/ble.h>
 #include <zmk/endpoints_types.h>
 #include <zmk/hog.h>
@@ -304,6 +308,26 @@ K_THREAD_STACK_DEFINE(hog_q_stack, CONFIG_ZMK_BLE_THREAD_STACK_SIZE);
 
 struct k_work_q hog_work_q;
 
+#if IS_ENABLED(CONFIG_TASK_WDT)
+// Watchdog channel for hog_work_q — detects bt_gatt_notify_cb K_FOREVER deadlock.
+// Fed by a periodic delayable work item on hog_work_q. If bt_gatt_notify_cb
+// blocks, the feed stops and the watchdog resets the MCU.
+#define HOG_WDT_FEED_MS 5000
+#define HOG_WDT_TIMEOUT_MS 30000
+
+static int hog_wdt_channel_id = -1;
+
+static void hog_wdt_feed_handler(struct k_work *work);
+K_WORK_DELAYABLE_DEFINE(hog_wdt_feed_work, hog_wdt_feed_handler);
+
+static void hog_wdt_feed_handler(struct k_work *work) {
+    if (hog_wdt_channel_id >= 0) {
+        task_wdt_feed(hog_wdt_channel_id);
+    }
+    k_work_schedule_for_queue(&hog_work_q, &hog_wdt_feed_work, K_MSEC(HOG_WDT_FEED_MS));
+}
+#endif
+
 K_MSGQ_DEFINE(zmk_hog_keyboard_msgq, sizeof(struct zmk_hid_keyboard_report_body),
               CONFIG_ZMK_BLE_KEYBOARD_REPORT_QUEUE_SIZE, 4);
 
@@ -466,6 +490,16 @@ static int zmk_hog_init(void) {
     static const struct k_work_queue_config queue_config = {.name = "HID Over GATT Send Work"};
     k_work_queue_start(&hog_work_q, hog_q_stack, K_THREAD_STACK_SIZEOF(hog_q_stack),
                        CONFIG_ZMK_BLE_THREAD_PRIORITY, &queue_config);
+
+#if IS_ENABLED(CONFIG_TASK_WDT)
+    hog_wdt_channel_id = task_wdt_add(HOG_WDT_TIMEOUT_MS, NULL, NULL);
+    if (hog_wdt_channel_id >= 0) {
+        k_work_schedule_for_queue(&hog_work_q, &hog_wdt_feed_work, K_MSEC(HOG_WDT_FEED_MS));
+        LOG_INF("HOG watchdog started: feed=%dms timeout=%dms", HOG_WDT_FEED_MS, HOG_WDT_TIMEOUT_MS);
+    } else {
+        LOG_ERR("Failed to add HOG watchdog channel: %d", hog_wdt_channel_id);
+    }
+#endif
 
     return 0;
 }
