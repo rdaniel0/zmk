@@ -12,6 +12,7 @@
 #include <zephyr/sys/reboot.h>
 
 #include <zephyr/logging/log.h>
+#include <zephyr/logging/log_ctrl.h>
 LOG_MODULE_REGISTER(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #if defined(CONFIG_SOC_SERIES_NRF52X)
@@ -24,7 +25,7 @@ LOG_MODULE_REGISTER(zmk, CONFIG_ZMK_LOG_LEVEL);
 void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf *esf) {
     LOG_ERR("===== FATAL ERROR (reason=%u) =====", reason);
     LOG_ERR("Thread: %s (%p)", k_thread_name_get(k_current_get()), k_current_get());
-    LOG_PANIC();  // Force log subsystem into immediate/synchronous mode
+    log_panic();  // Force log subsystem into immediate/synchronous mode
 
     // Spin briefly to give USB CDC time to drain the buffer.
     // We cannot call k_sleep() in fatal context.
