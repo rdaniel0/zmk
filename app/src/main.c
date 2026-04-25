@@ -8,6 +8,8 @@
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/settings/settings.h>
+#include <zephyr/fatal.h>
+#include <zephyr/sys/reboot.h>
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(zmk, CONFIG_ZMK_LOG_LEVEL);
@@ -15,6 +17,22 @@ LOG_MODULE_REGISTER(zmk, CONFIG_ZMK_LOG_LEVEL);
 #if defined(CONFIG_SOC_SERIES_NRF52X)
 #include <hal/nrf_power.h>
 #endif
+
+// Override the default fatal error handler so we can flush the log buffer
+// before the MCU resets. The default handler in Zephyr calls sys_reboot()
+// immediately, which truncates the fault dump being sent over USB CDC.
+void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf *esf) {
+    LOG_ERR("===== FATAL ERROR (reason=%u) =====", reason);
+    LOG_ERR("Thread: %s (%p)", k_thread_name_get(k_current_get()), k_current_get());
+    LOG_PANIC();  // Force log subsystem into immediate/synchronous mode
+
+    // Spin briefly to give USB CDC time to drain the buffer.
+    // We cannot call k_sleep() in fatal context.
+    for (volatile uint32_t i = 0; i < 0x800000; i++) { }
+
+    sys_reboot(SYS_REBOOT_COLD);
+    CODE_UNREACHABLE;
+}
 
 #if IS_ENABLED(CONFIG_TASK_WDT)
 #include <zephyr/task_wdt/task_wdt.h>
