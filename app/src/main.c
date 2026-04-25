@@ -22,6 +22,9 @@ LOG_MODULE_REGISTER(zmk, CONFIG_ZMK_LOG_LEVEL);
 // Override the default fatal error handler so we can flush the log buffer
 // before the MCU resets. The default handler in Zephyr calls sys_reboot()
 // immediately, which truncates the fault dump being sent over USB CDC.
+// Only meaningful when CONFIG_LOG is enabled (logging builds); for other
+// builds we fall back to default Zephyr behavior.
+#if IS_ENABLED(CONFIG_LOG)
 void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf *esf) {
     LOG_ERR("===== FATAL ERROR (reason=%u) =====", reason);
     LOG_ERR("Thread: %s (%p)", k_thread_name_get(k_current_get()), k_current_get());
@@ -34,6 +37,7 @@ void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf *esf) 
     sys_reboot(SYS_REBOOT_COLD);
     CODE_UNREACHABLE;
 }
+#endif
 
 #if IS_ENABLED(CONFIG_TASK_WDT)
 #include <zephyr/task_wdt/task_wdt.h>
